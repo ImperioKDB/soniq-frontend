@@ -1,0 +1,407 @@
+We can definitely upgrade your code to handle real, local audio files.
+Before we dive into the code, I need to be completely transparent with you about how web browsers interact with phone hardware, specifically regarding volume synchronization.
+Here is the reality: Web browsers (like Chrome or Safari on your phone) do not allow websites to read or control your phone's physical hardware volume buttons. This is a strict security feature to prevent malicious websites from hijacking your phone and blasting sound at 100%.
+How it actually works on mobile:
+ * Your phone's physical volume buttons control the "Master" device volume. This will work perfectly and automatically with your player.
+ * The volume slider in our code controls the "App" volume.
+ * Because they are separate, moving your physical phone buttons will not move the visual slider on the screen, and vice-versa. On mobile, it is usually best to just rely on the hardware buttons, but we will leave the slider in for when you use it on a laptop.
+Now, let's get you that Aurora effect and the ability to play local songs directly from your device.
+The Upgrade: Local File Support & Aurora Glow
+We are going to add a new "Folder" icon to the top right of your player. When you tap it, it will open your phone's file manager and let you select your .mp3 or .m4a files. It reads them directly from your device storage without using any internet data.
+Replace your entire index.html code with this new, upgraded version:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SONIQ — Local Player</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:       #091535;
+    --surface:  #0e1e4a;
+    --card:     #122060;
+    --border:   #1e3278;
+    --royal:    #1a3fa3;
+    --sky:      #56b4f5;
+    --sky-dim:  #2e7bbf;
+    --gold:     #f0c040;
+    --gold-dim: #b88a1a;
+    --white:    #f0f6ff;
+    --muted:    #5c7abf;
+    --panel-bg: #0b1840;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    font-family: 'Space Mono', monospace;
+    color: var(--white);
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; position: relative;
+  }
+
+  /* 1. The Aurora Effect */
+  body::before {
+    content: ''; position: fixed; top: -10%; left: 20%;
+    width: 450px; height: 450px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(86,180,245,0.15) 0%, transparent 70%);
+    animation: floatLight 8s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+
+  body::after {
+    content: ''; position: fixed; bottom: -10%; right: 20%;
+    width: 500px; height: 500px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(240,192,64,0.1) 0%, transparent 70%);
+    animation: floatLight 11s ease-in-out infinite alternate-reverse;
+    pointer-events: none;
+  }
+
+  @keyframes floatLight {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(40px, 50px) scale(1.15); }
+  }
+
+  .grain {
+    position: fixed; inset: 0; pointer-events: none; z-index: 200; opacity: 0.02;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .player-shell {
+    width: min(460px, 95vw);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 26px;
+    padding: 32px 28px 28px;
+    box-shadow: 0 0 0 1px rgba(86,180,245,0.1), 0 40px 80px rgba(0,0,0,0.5), 0 0 60px rgba(26,63,163,0.15) inset;
+    position: relative;
+    z-index: 10;
+    overflow: hidden;
+  }
+
+  .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+  .logo { font-family:'Cormorant Garamond',serif; font-size:1.15rem; font-weight:600; letter-spacing:0.3em; color:var(--gold); text-transform:uppercase; }
+  .header-icons { display:flex; gap:10px; align-items:center; }
+
+  .icon-btn {
+    background:none; border:none; cursor:pointer; color:var(--muted);
+    transition:color 0.2s; display:flex; align-items:center; padding:4px; border-radius:6px;
+  }
+  .icon-btn:hover { color:var(--white); }
+
+  /* Hidden file input */
+  #fileUpload { display: none; }
+
+  /* Tabs & Views */
+  .tabs { display:flex; gap:0; margin-bottom:22px; border-radius:12px; background:var(--surface); padding:4px; }
+  .tab-btn { flex:1; background:none; border:none; cursor:pointer; font-family:'Space Mono',monospace; font-size:0.6rem; letter-spacing:0.15em; text-transform:uppercase; color:var(--muted); padding:8px 0; border-radius:9px; transition:all 0.25s; }
+  .tab-btn.active { background:var(--royal); color:var(--white); box-shadow:0 2px 10px rgba(26,63,163,0.5); }
+  
+  .disc-view, .lyrics-view { display:none; }
+  .disc-view.visible, .lyrics-view.visible { display:block; }
+
+  /* Disc */
+  .disc-wrapper { display:flex; justify-content:center; margin-bottom:26px; position:relative; }
+  .disc-glow { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:210px; height:210px; border-radius:50%; background:radial-gradient(circle, rgba(86,180,245,0.18) 0%, transparent 70%); transition:opacity 0.6s; opacity:0.4; }
+  .disc { width:175px; height:175px; border-radius:50%; background: radial-gradient(circle at 50% 50%, #142560 22%, transparent 22%), repeating-radial-gradient(circle at 50%, #091535 0px, #091535 2px, #142060 2px, #142060 4px, #0e1a50 4px, #0e1a50 6px); border:2px solid var(--border); position:relative; animation:spin 5s linear infinite; animation-play-state:paused; box-shadow:0 0 0 1px rgba(86,180,245,0.12), 0 8px 32px rgba(0,0,0,0.5); transition:box-shadow 0.4s; }
+  .disc.playing { animation-play-state:running; box-shadow:0 0 0 1px rgba(86,180,245,0.3), 0 8px 40px rgba(0,0,0,0.5), 0 0 36px rgba(86,180,245,0.15); }
+  .disc::before { content:''; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:46px; height:46px; border-radius:50%; background:linear-gradient(135deg,var(--gold) 0%,var(--gold-dim) 100%); box-shadow:0 2px 10px rgba(0,0,0,0.4); }
+  .disc::after { content:''; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:10px; height:10px; border-radius:50%; background:var(--bg); }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+  /* Lyrics (Placeholder for local files) */
+  .lyrics-view { height:218px; overflow-y:auto; margin-bottom:22px; padding:0 4px; text-align: center; color: var(--muted); display: flex; align-items: center; justify-content: center; font-style: italic; }
+
+  /* Track info */
+  .track-info { text-align:center; margin-bottom:22px; }
+  .track-title { font-family:'Cormorant Garamond',serif; font-size:1.65rem; font-weight:600; color:var(--white); line-height:1.2; margin-bottom:5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+  .track-artist { font-size:0.65rem; letter-spacing:0.2em; color:var(--sky); text-transform:uppercase; }
+  .track-album  { font-family:'Cormorant Garamond',serif; font-style:italic; font-size:0.82rem; color:var(--muted); margin-top:3px; }
+  .sky-line { width:32px; height:2px; background:linear-gradient(90deg,var(--sky),transparent); margin:0 auto 20px; border-radius:1px; }
+
+  /* Progress */
+  .progress-section { margin-bottom:22px; }
+  .progress-bar-track { height:3px; background:var(--border); border-radius:2px; cursor:pointer; position:relative; margin-bottom:9px; }
+  .progress-bar-fill { height:100%; background:linear-gradient(90deg,var(--sky-dim),var(--sky)); border-radius:2px; width:0%; transition:width 0.1s linear; position:relative; }
+  .progress-bar-fill::after { content:''; position:absolute; right:-5px; top:50%; transform:translateY(-50%); width:11px; height:11px; border-radius:50%; background:var(--sky); opacity:0; transition:opacity 0.2s; }
+  .progress-bar-track:hover .progress-bar-fill::after { opacity:1; }
+  .time-row { display:flex; justify-content:space-between; font-size:0.62rem; color:var(--muted); }
+
+  /* Controls */
+  .controls { display:flex; align-items:center; justify-content:center; gap:18px; margin-bottom:22px; }
+  .ctrl-btn { background:none; border:none; cursor:pointer; color:var(--muted); padding:8px; border-radius:50%; transition:all 0.2s; }
+  .ctrl-btn:hover { color:var(--white); transform:scale(1.1); }
+  .ctrl-btn.active { color:var(--sky); }
+  .play-btn { width:56px; height:56px; border-radius:50%; background:linear-gradient(135deg,var(--sky) 0%,var(--sky-dim) 100%); border:none; cursor:pointer; color:var(--bg); display:flex; align-items:center; justify-content:center; box-shadow:0 4px 20px rgba(86,180,245,0.4); transition:all 0.2s; }
+  .play-btn:hover { transform:scale(1.07); }
+
+  /* Volume */
+  .volume-row { display:flex; align-items:center; gap:10px; }
+  .vol-icon { color:var(--muted); flex-shrink:0; }
+  .vol-slider { -webkit-appearance:none; flex:1; height:3px; border-radius:2px; background:var(--border); outline:none; cursor:pointer; }
+  .vol-slider::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:var(--sky); cursor:pointer; }
+
+  /* Queue Panel */
+  .queue-panel { position:absolute; top:0; right:0; bottom:0; width:100%; background:var(--panel-bg); border-radius:26px; padding:28px 22px; overflow-y:auto; transform:translateX(100%); transition:transform 0.35s ease; z-index:50; }
+  .queue-panel.open { transform:translateX(0); }
+  .queue-panel-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; }
+  .queue-panel-title  { font-size:0.6rem; letter-spacing:0.25em; text-transform:uppercase; color:var(--sky); }
+  .q-item { display:flex; align-items:center; gap:12px; padding:10px 8px; border-radius:10px; cursor:pointer; }
+  .q-item:hover { background:rgba(86,180,245,0.07); }
+  .q-item.now-playing { background:rgba(86,180,245,0.1); }
+  .q-info { flex:1; min-width:0; }
+  .q-title { font-size:0.78rem; color:var(--white); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .panel-overlay { display:none; position:absolute; inset:0; border-radius:26px; background:rgba(0,0,0,0.35); z-index:49; }
+  .panel-overlay.visible { display:block; }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<div class="player-shell">
+  <div class="panel-overlay" id="panelOverlay"></div>
+  <div class="queue-panel" id="queuePanel">
+    <div class="queue-panel-header">
+      <div class="queue-panel-title">Your Local Queue</div>
+      <button class="icon-btn" id="closeQueueBtn">✕</button>
+    </div>
+    <div id="queueList" style="font-size: 0.8rem; color: var(--muted); text-align: center; margin-top: 20px;">
+      Tap the folder icon to add songs.
+    </div>
+  </div>
+
+  <div class="header">
+    <div class="logo">Soniq</div>
+    <div class="header-icons">
+      <label for="fileUpload" class="icon-btn" title="Add Local Songs">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          <line x1="12" y1="11" x2="12" y2="17"/>
+          <line x1="9" y1="14" x2="15" y2="14"/>
+        </svg>
+      </label>
+      <input type="file" id="fileUpload" accept="audio/*" multiple />
+
+      <button class="icon-btn" id="openQueueBtn" title="Queue">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+          <circle cx="3" cy="6" r="1" fill="currentColor"/><circle cx="3" cy="12" r="1" fill="currentColor"/><circle cx="3" cy="18" r="1" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" id="tabDisc">Now Playing</button>
+    <button class="tab-btn" id="tabLyrics">Info</button>
+  </div>
+
+  <div class="disc-view visible" id="discView">
+    <div class="disc-wrapper">
+      <div class="disc-glow" id="discGlow"></div>
+      <div class="disc" id="disc"></div>
+    </div>
+  </div>
+
+  <div class="lyrics-view" id="lyricsView">
+    Playing from device storage.<br>Lyrics are not available for local files.
+  </div>
+
+  <div class="sky-line"></div>
+
+  <div class="track-info">
+    <div class="track-title" id="trackTitle">No Track Loaded</div>
+    <div class="track-artist" id="trackArtist">Tap folder icon to add music</div>
+    <div class="track-album" id="trackAlbum">--</div>
+  </div>
+
+  <div class="progress-section">
+    <div class="progress-bar-track" id="progressTrack">
+      <div class="progress-bar-fill" id="progressFill"></div>
+    </div>
+    <div class="time-row">
+      <span id="currentTime">0:00</span>
+      <span id="totalTime">0:00</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="ctrl-btn" id="shuffleBtn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></button>
+    <button class="ctrl-btn" id="prevBtn"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+    <button class="play-btn" id="playBtn"><svg id="playIcon" width="21" height="21" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>
+    <button class="ctrl-btn" id="nextBtn"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+    <button class="ctrl-btn" id="loopBtn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></button>
+  </div>
+
+  <div class="volume-row">
+    <div class="vol-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg></div>
+    <input type="range" class="vol-slider" id="volSlider" min="0" max="100"/>
+    <div class="vol-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></div>
+  </div>
+</div>
+
+<script>
+// 3. Local Storage Array & Audio API
+let tracks = [];
+let currentTrack = 0, isPlaying = false;
+let shuffleOn = false, loopOn = false;
+
+const audio = new Audio();
+const fileUpload = document.getElementById('fileUpload');
+
+// Listen for files being selected
+fileUpload.addEventListener('change', function(e) {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+
+  // Clear the placeholder if it's the first time adding songs
+  if (tracks.length === 0) document.getElementById('queueList').innerHTML = '';
+
+  files.forEach(file => {
+    // Generate a secure, temporary local URL to play the file
+    const src = URL.createObjectURL(file);
+    
+    // Clean up the file name to use as a title
+    const cleanTitle = file.name.replace(/\.[^/.]+$/, ""); 
+
+    tracks.push({
+      title: cleanTitle,
+      artist: "Local Device",
+      album: "Local Files",
+      src: src
+    });
+  });
+
+  renderQueue();
+  
+  // If this is the first batch of songs added, load the first one automatically
+  if (tracks.length === files.length) {
+    loadTrack(0);
+  }
+});
+
+function fmt(s) { 
+  if (isNaN(s)) return "0:00";
+  return `${Math.floor(s/60)}:${Math.floor(s%60).toString().padStart(2,'0')}`; 
+}
+
+function loadTrack(i) {
+  if (tracks.length === 0) return;
+  const t = tracks[i];
+  document.getElementById('trackTitle').textContent = t.title;
+  document.getElementById('trackArtist').textContent = t.artist;
+  document.getElementById('trackAlbum').textContent = t.album;
+  
+  audio.src = t.src;
+  
+  // Wait for audio metadata to load so we can get the total duration
+  audio.addEventListener('loadedmetadata', () => {
+    document.getElementById('totalTime').textContent = fmt(audio.duration);
+  }, { once: true });
+
+  renderQueue();
+}
+
+audio.addEventListener('timeupdate', () => {
+  if (!audio.duration) return;
+  const pct = (audio.currentTime / audio.duration) * 100;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('currentTime').textContent = fmt(audio.currentTime);
+});
+
+audio.addEventListener('ended', () => { loopOn ? (audio.currentTime = 0, audio.play()) : nextTrack(); });
+
+function togglePlay() { 
+  if (tracks.length === 0) return; // Don't play if nothing is loaded
+  isPlaying ? pause() : play(); 
+}
+
+function play() {
+  isPlaying = true;
+  document.getElementById('disc').classList.add('playing');
+  document.getElementById('discGlow').style.opacity = '1';
+  document.getElementById('playIcon').innerHTML = `<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>`;
+  audio.play();
+  renderQueue();
+}
+
+function pause() {
+  isPlaying = false;
+  document.getElementById('disc').classList.remove('playing');
+  document.getElementById('discGlow').style.opacity = '0.4';
+  document.getElementById('playIcon').innerHTML = `<polygon points="5 3 19 12 5 21 5 3"/>`;
+  audio.pause();
+  renderQueue();
+}
+
+function nextTrack() {
+  if (tracks.length === 0) return;
+  let wasPlaying = isPlaying; pause();
+  currentTrack = shuffleOn ? Math.floor(Math.random()*tracks.length) : (currentTrack + 1) % tracks.length;
+  loadTrack(currentTrack); if (wasPlaying) play();
+}
+
+function prevTrack() {
+  if (tracks.length === 0) return;
+  let wasPlaying = isPlaying; pause();
+  if (audio.currentTime > 3) { audio.currentTime = 0; if (wasPlaying) play(); return; }
+  currentTrack = (currentTrack - 1 + tracks.length) % tracks.length;
+  loadTrack(currentTrack); if (wasPlaying) play();
+}
+
+// Event Listeners
+document.getElementById('playBtn').addEventListener('click', togglePlay);
+document.getElementById('nextBtn').addEventListener('click', nextTrack);
+document.getElementById('prevBtn').addEventListener('click', prevTrack);
+document.getElementById('shuffleBtn').addEventListener('click', function() { shuffleOn = !shuffleOn; this.classList.toggle('active', shuffleOn); });
+document.getElementById('loopBtn').addEventListener('click', function() { loopOn = !loopOn; this.classList.toggle('active', loopOn); });
+
+document.getElementById('progressTrack').addEventListener('click', e => {
+  if (tracks.length === 0 || !audio.duration) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  audio.currentTime = ((e.clientX - r.left) / r.width) * audio.duration;
+});
+
+// UI Views
+document.getElementById('tabDisc').addEventListener('click', () => { document.getElementById('discView').classList.add('visible'); document.getElementById('lyricsView').classList.remove('visible'); document.getElementById('tabDisc').classList.add('active'); document.getElementById('tabLyrics').classList.remove('active'); });
+document.getElementById('tabLyrics').addEventListener('click', () => { document.getElementById('lyricsView').classList.add('visible'); document.getElementById('discView').classList.remove('visible'); document.getElementById('tabLyrics').classList.add('active'); document.getElementById('tabDisc').classList.remove('active'); });
+
+// Queue
+const qPanel = document.getElementById('queuePanel'), pOverlay = document.getElementById('panelOverlay');
+document.getElementById('openQueueBtn').addEventListener('click', () => { qPanel.classList.add('open'); pOverlay.classList.add('visible'); });
+function closeQ() { qPanel.classList.remove('open'); pOverlay.classList.remove('visible'); }
+document.getElementById('closeQueueBtn').addEventListener('click', closeQ);
+pOverlay.addEventListener('click', closeQ);
+
+function renderQueue() {
+  const list = document.getElementById('queueList');
+  if (tracks.length === 0) return;
+  list.innerHTML = '';
+  tracks.forEach((t, i) => {
+    const div = document.createElement('div');
+    div.className = 'q-item' + (i === currentTrack ? ' now-playing' : '');
+    div.innerHTML = `<div class="q-info"><div class="q-title" style="color: ${i === currentTrack ? 'var(--gold)' : 'var(--white)'}">${t.title}</div></div>`;
+    div.addEventListener('click', () => { pause(); currentTrack = i; loadTrack(i); play(); closeQ(); });
+    list.appendChild(div);
+  });
+}
+
+// Volume sync
+const volSlider = document.getElementById('volSlider');
+const savedVol = localStorage.getItem('playerVolume');
+volSlider.value = savedVol !== null ? savedVol : 70;
+function updateVol() {
+  const v = volSlider.value;
+  audio.volume = v / 100;
+  volSlider.style.background = `linear-gradient(90deg,var(--sky) ${v}%,var(--border) ${v}%)`;
+  localStorage.setItem('playerVolume', v);
+}
+volSlider.addEventListener('input', updateVol);
+updateVol();
+</script>
+</body>
+</html>
+
